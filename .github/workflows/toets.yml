@@ -1,0 +1,38 @@
+name: Toets op archiefdata
+
+on:
+  workflow_dispatch:
+    inputs:
+      maand:
+        description: 'Maand om te toetsen (JJJJ-MM). Kies een maand waarvoor OMNI al bestaat.'
+        default: '2025-06'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-schrijven
+  cancel-in-progress: false
+
+jobs:
+  toets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q netCDF4 numpy
+      - name: Toets draaien
+        run: python scripts/toets_archief.py "${{ github.event.inputs.maand }}"
+      - name: Opslaan in de repository
+        if: always()
+        run: |
+          git config user.name "zonnestroom-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -q -m "Toets ${{ github.event.inputs.maand }}"
+          for i in 1 2 3; do git pull -q --rebase && git push -q && exit 0; sleep 5; done
+          exit 1
