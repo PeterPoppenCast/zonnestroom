@@ -21,6 +21,7 @@ import os
 import re
 import struct
 import time
+import urllib.error
 import urllib.parse
 
 from kern import DATA, haal, lees, schrijf, nu_utc
@@ -32,6 +33,8 @@ CDX = 'https://web.archive.org/cdx/search/cdx?url={}&output=json&fl=timestamp,di
 RUW = 'https://web.archive.org/web/{}id_/{}'
 ADRESSEN = ['http://sosrff.tsu.ru/new/{}', 'https://sos70.ru/provider.php?file={}']
 BUDGET_S = 300
+VERSIE = 2
+BEVROREN = '20250905'  # het oude adres staat sindsdien stil; latere kopieën zijn steeds hetzelfde oude beeld
 VELDEN = ['f1', 'f2', 'f3', 'f4', 'a1', 'a2', 'a3', 'a4']
 LEEG = -32768
 
@@ -110,8 +113,14 @@ def kopieen(naam):
     return sorted(set(uit))
 
 
+def bruikbaar(t, u):
+    return not ('sosrff' in u and t[:8] > BEVROREN)
+
+
 def kies(srf, sra):
     """Nieuwste eerst, telkens minstens twee dagen ertussen; sra binnen zes uur van srf."""
+    srf = [(t, u) for t, u in srf if bruikbaar(t, u)]
+    sra = [(t, u) for t, u in sra if bruikbaar(t, u)]
     gekozen, vorige = [], None
     sra_t = [(ts_dt(t), t, u) for t, u in sra]
     for t, u in sorted(srf, reverse=True):
@@ -157,6 +166,11 @@ def schrijf_archief(pad, uren):
 
 def tomsk(log, staat):
     import digitaliseer
+    if staat.get('versie') != VERSIE:
+        staat.update({'versie': VERSIE, 'stapel': [], 'mislukt': {}, 'lijst_op': ''})
+    if staat.get('pauze_tot', '') > nu_utc().isoformat():
+        log['tomsk'] = {'pauze_tot': staat['pauze_tot'], 'nog_te_doen': len(staat.get('stapel', []))}
+        return
     if not staat.get('stapel') or staat.get('lijst_op', '') < (nu_utc() - dt.timedelta(days=30)).strftime('%Y-%m-%d'):
         srf, sra = kopieen('srf.jpg'), kopieen('sra.jpg')
         gedaan = set(staat.get('gedaan', []))
@@ -174,7 +188,10 @@ def tomsk(log, staat):
                 if not k.get(sleutel):
                     continue
                 ts, url = k[sleutel]
-                r = digitaliseer.lees(haal(RUW.format(ts, url), timeout=60), soort)
+                data = haal(RUW.format(ts, url), timeout=60)
+                if not data.startswith(b'\xff\xd8'):
+                    raise ValueError(f'geen beeld in het archief: {data[:40]!r}')
+                r = digitaliseer.lees(data, soort)
                 # het archief vult alleen aan; wat er al staat (live) blijft staan
                 for u, rij in r['uren'].items():
                     bestaand = uren.setdefault(u, {})
@@ -183,11 +200,16 @@ def tomsk(log, staat):
             staat.setdefault('gedaan', []).append(t)
             klaar += 1
         except Exception as e:
-            staat.setdefault('mislukt', {})[t] = f'{type(e).__name__}: {str(e)[:120]}'
-            if 'HTTP Error 429' in str(e):
-                staat['stapel'].insert(0, k)  # te snel: later opnieuw
+            tekst = f'{type(e).__name__}: {str(e)[:120]}'
+            # het archief remt af (weigert, time-out, 429, 5xx): terug op de stapel en een uur pauze
+            if isinstance(e, OSError) and not isinstance(e, urllib.error.HTTPError) or \
+                    (isinstance(e, urllib.error.HTTPError) and (e.code == 429 or e.code >= 500)):
+                staat['stapel'].insert(0, k)
+                staat['pauze_tot'] = (nu_utc() + dt.timedelta(hours=1)).isoformat()
+                log.setdefault('afgeremd', tekst)
                 break
-        time.sleep(1)
+            staat.setdefault('mislukt', {})[t] = tekst
+        time.sleep(5)  # het archief wil rustig aan: ruim onder 15 verzoeken per minuut
     schrijf_archief(pad, uren)
     log['tomsk'] = {'verwerkt_deze_run': klaar, 'nog_te_doen': len(staat['stapel']),
                     'gedaan_totaal': len(staat.get('gedaan', [])), 'mislukt_totaal': len(staat.get('mislukt', {})),
