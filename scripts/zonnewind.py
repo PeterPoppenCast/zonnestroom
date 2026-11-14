@@ -5,6 +5,7 @@ Uitvoer in data/:
   eigen/JJJJ.json   eigen uurreeks (voorlopig), mediaan over alle satellieten, sleutel 'JJJJ-MM-DDTUU'
   bronnen/JJJJ.json dezelfde uren per satelliet apart (SOLAR1, IMAP, ACE, WIND), voor de toets per satelliet
   status-wind.json  wat de dagelijkse Wind-ophaal deed, met de gevonden variabelnamen
+  controle.json     dagelijkse controle: GFZ-Kp, koppeling zonnewind-Kp, satellieten onderling
   omni/JJJJ.json    officiële OMNI uurreeks, zelfde vorm
   live/minuten.json laatste 7 dagen per minuut, al verschoven naar de Aarde
   toets.json        vergelijking eigen tegen OMNI waar beide bestaan
@@ -319,13 +320,19 @@ def main():
             verken_wind(status)
         except Exception as e:
             status['fouten'].append(f'Wind-verkenning: {e}')
+    if dagelijks:
+        try:
+            import controle
+            controle.main(status)
+        except Exception as e:
+            status['fouten'].append(f'controle: {e}')
     try:
         toets_bijwerken(status)
     except Exception as e:
         status['fouten'].append(f'toets: {e}')
 
     vorige = lees(os.path.join(DATA, 'status.json'), {})
-    for sleutel in ('omni', 'wind_verkenning', 'wind'):
+    for sleutel in ('omni', 'wind_verkenning', 'wind', 'controle'):
         if sleutel not in status and sleutel in vorige:
             status[sleutel] = vorige[sleutel]
     schrijf(os.path.join(DATA, 'status.json'), status)
