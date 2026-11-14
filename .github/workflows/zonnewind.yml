@@ -1,0 +1,41 @@
+name: Zonnewind bijwerken
+
+on:
+  schedule:
+    - cron: '7 * * * *'   # elk uur, 7 minuten over
+  workflow_dispatch:
+    inputs:
+      omni:
+        description: 'NASA OMNI nu ophalen? (ja/nee)'
+        default: 'nee'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-schrijven
+  cancel-in-progress: false
+
+jobs:
+  bijwerken:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Ophalen en verwerken
+        env:
+          OMNI_NU: ${{ github.event.inputs.omni }}
+        run: python scripts/zonnewind.py
+      - name: Opslaan in de repository
+        if: always()
+        run: |
+          git config user.name "zonnestroom-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then echo "Niets nieuws."; exit 0; fi
+          git commit -q -m "Zonnewind $(date -u +%Y-%m-%dT%H:%MZ)"
+          for i in 1 2 3; do git pull -q --rebase && git push -q && exit 0; sleep 5; done
+          exit 1
