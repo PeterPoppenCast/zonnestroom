@@ -6,6 +6,7 @@ Uitvoer in data/:
   bronnen/JJJJ.json dezelfde uren per satelliet apart (SOLAR1, IMAP, ACE, WIND), voor de toets per satelliet
   status-wind.json  wat de dagelijkse Wind-ophaal deed, met de gevonden variabelnamen
   controle.json     dagelijkse controle: GFZ-Kp, koppeling zonnewind-Kp, satellieten onderling
+  schumann.json     elk uur: de drie Schumann-beelden uit Tomsk, zelf op de tak 'beelden'
   omni/JJJJ.json    officiële OMNI uurreeks, zelfde vorm
   live/minuten.json laatste 7 dagen per minuut, al verschoven naar de Aarde
   toets.json        vergelijking eigen tegen OMNI waar beide bestaan
@@ -326,6 +327,11 @@ def main():
             controle.main(status)
         except Exception as e:
             status['fouten'].append(f'controle: {e}')
+    try:
+        import schumann
+        schumann.main(status)
+    except Exception as e:
+        status['fouten'].append(f'Schumann: {e}')
     try:
         toets_bijwerken(status)
     except Exception as e:
