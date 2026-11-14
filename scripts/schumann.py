@@ -48,6 +48,15 @@ def leesuit(ruw, log, nu):
     """srf.jpg en sra.jpg omzetten naar cijfers en bij de reeks voegen."""
     try:
         import digitaliseer
+    except ImportError:
+        # numpy en Pillow staan niet standaard op de GitHub-runner
+        try:
+            import sys
+            subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', 'numpy', 'pillow'], check=True, capture_output=True, timeout=240)
+            import digitaliseer
+        except Exception as e:
+            log['fouten'].append(f'uitlezen: {e}')
+            return
     except Exception as e:
         log['fouten'].append(f'uitlezen: {e}')
         return
