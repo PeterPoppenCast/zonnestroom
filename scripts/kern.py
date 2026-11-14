@@ -96,7 +96,8 @@ def ontpiek(minuten):
 
 
 def verschuif(minuten):
-    """Verschuif elke minuut van L1 naar aankomst bij de boegschok: (L1 - boegschok) / v.
+    """Verschuif elke minuut van L1 naar aankomst bij de boegschok: (afstand - boegschok) / v.
+    Afstand = de echte x-positie van de satelliet als die bekend is (Wind), anders 1,5 miljoen km.
     Zonder snelheid op die minuut wordt de laatste bekende snelheid gebruikt."""
     uit, v_laatst = {}, None
     for k in sorted(minuten):
@@ -106,7 +107,7 @@ def verschuif(minuten):
             v_laatst = o['v']
         if not v:
             continue
-        seconden = (L1_KM - BOEGSCHOK_KM) / v
+        seconden = (o.get('x_km', L1_KM) - BOEGSCHOK_KM) / v
         k2 = (k + dt.timedelta(seconds=seconden)).replace(second=0, microsecond=0)
         doel = uit.setdefault(k2, {})
         doel.update({f: o[f] for f in VELDEN if f in o})

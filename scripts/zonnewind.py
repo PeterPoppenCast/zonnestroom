@@ -3,7 +3,8 @@ Eens per dag: officiële NASA OMNI ophalen en de eigen reeks ermee vergelijken.
 
 Uitvoer in data/:
   eigen/JJJJ.json   eigen uurreeks (voorlopig), mediaan over alle satellieten, sleutel 'JJJJ-MM-DDTUU'
-  bronnen/JJJJ.json dezelfde uren per satelliet apart (SOLAR1, IMAP, ACE), voor de toets per satelliet
+  bronnen/JJJJ.json dezelfde uren per satelliet apart (SOLAR1, IMAP, ACE, WIND), voor de toets per satelliet
+  status-wind.json  wat de dagelijkse Wind-ophaal deed, met de gevonden variabelnamen
   omni/JJJJ.json    officiële OMNI uurreeks, zelfde vorm
   live/minuten.json laatste 7 dagen per minuut, al verschoven naar de Aarde
   toets.json        vergelijking eigen tegen OMNI waar beide bestaan
@@ -23,6 +24,7 @@ import json
 NOAA = 'https://services.swpc.noaa.gov/'
 SPDF = 'https://spdf.gsfc.nasa.gov/pub/data/omni/low_res_omni/'
 LIVE_DAGEN = 7
+WIND_DAGEN = 25   # zoveel dagen Wind k0 opnieuw ophalen; dekt het gat tot OMNI
 
 
 def goed(r):
@@ -134,33 +136,6 @@ def noaa_kp():
     return uit
 
 
-def bewaar_eigen(uren, kp):
-    per_jaar = {}
-    for u, r in uren.items():
-        per_jaar.setdefault(u.year, {})[uursleutel(u)] = r
-    for k, waarde in kp.items():
-        per_jaar.setdefault(int(k[:4]), {}).setdefault(k, {})['kp'] = waarde
-    nieuw = 0
-    for jaar, recs in per_jaar.items():
-        pad = os.path.join(DATA, 'eigen', f'{jaar}.json')
-        oud = lees(pad, {})
-        for k, r in recs.items():
-            o = oud.get(k, {})
-            # vollediger uur wint; Kp wordt altijd bijgewerkt
-            if r.get('nmin', 0) >= o.get('nmin', 0):
-                kp_oud = o.get('kp')
-                o = {**o, **r}
-                if 'kp' not in r and kp_oud is not None:
-                    o['kp'] = kp_oud
-            elif 'kp' in r:
-                o['kp'] = r['kp']
-            if k not in oud:
-                nieuw += 1
-            oud[k] = o
-        schrijf(pad, dict(sorted(oud.items())))
-    return nieuw
-
-
 def bewaar_bronnen(per_bron_uren):
     per_jaar = {}
     for b, uren in per_bron_uren.items():
@@ -176,6 +151,37 @@ def bewaar_bronnen(per_bron_uren):
                     o[b] = r
             oud[k] = o
         schrijf(pad, dict(sorted(oud.items())))
+    return {jaar: set(recs) for jaar, recs in per_jaar.items()}
+
+
+def herbereken_eigen(geraakt, kp):
+    """Eigen reeks = per uur de mediaan over alle satellieten in data/bronnen. Kp erbij."""
+    nieuw = 0
+    for k, waarde in kp.items():
+        geraakt.setdefault(int(k[:4]), set()).add(k)
+    for jaar, sleutels in geraakt.items():
+        bronnen = lees(os.path.join(DATA, 'bronnen', f'{jaar}.json'), {})
+        pad = os.path.join(DATA, 'eigen', f'{jaar}.json')
+        eigen = lees(pad, {})
+        sub = {k: bronnen[k] for k in sleutels if k in bronnen}
+        per_bron = {}
+        for k, per in sub.items():
+            for b, r in per.items():
+                per_bron.setdefault(b, {})[k] = r
+        gecombineerd = combineer(per_bron)
+        for k in sleutels:
+            oud = eigen.get(k, {})
+            r = dict(gecombineerd.get(k, {}))
+            if k in kp:
+                r['kp'] = kp[k]
+            elif 'kp' in oud:
+                r['kp'] = oud['kp']
+            if r:
+                if k not in eigen:
+                    nieuw += 1
+                eigen[k] = r
+        schrijf(pad, dict(sorted(eigen.items())))
+    return nieuw
 
 
 def bewaar_live(verschoven):
@@ -262,24 +268,44 @@ def main():
         status['pieken_verwijderd'] = {b: ontpiek(m) for b, m in per_bron.items()}
         verschoven_per_bron = {b: verschuif(m) for b, m in per_bron.items()}
         uren_per_bron = {b: per_uur(v) for b, v in verschoven_per_bron.items()}
-        uren = combineer(uren_per_bron)
         verschoven = combineer_minuten(verschoven_per_bron)
-        try:
-            kp = noaa_kp()
-        except Exception as e:  # Kp is bijzaak
-            kp = {}
-            status['fouten'].append(f'Kp: {e}')
-        status['eigen_nieuwe_uren'] = bewaar_eigen(uren, kp)
-        bewaar_bronnen(uren_per_bron)
         status['live_minuten'] = bewaar_live(verschoven)
         status['uren_per_bron'] = {b: len(u) for b, u in uren_per_bron.items()}
         if verschoven:
             status['aarde_tot'] = max(verschoven).isoformat() + 'Z'
-            laatste = verschoven[max(verschoven)]
-            status['looptijd_min'] = laatste.get('loop')
+            status['looptijd_min'] = verschoven[max(verschoven)].get('loop')
             status['bronnen'] = sorted(per_bron)
     except Exception as e:
         status['fouten'].append(f'NOAA: {e}')
+        traceback.print_exc()
+
+    if 'uren_per_bron' not in locals():
+        uren_per_bron = {}
+    dagelijks = os.environ.get('OMNI_NU') == 'ja' or nu.hour == 4
+    if dagelijks or not os.path.exists(os.path.join(DATA, 'status-wind.json')):
+        wlog = {'run': status['run']}
+        try:
+            import wind
+            wm = wind.minuten(WIND_DAGEN, wlog)
+            wlog['pieken_verwijderd'] = ontpiek(wm)
+            uren_per_bron['WIND'] = per_uur(verschuif(wm))
+            wlog['uren'] = len(uren_per_bron['WIND'])
+        except Exception as e:
+            wlog.setdefault('fouten', []).append(f'{type(e).__name__}: {e}')
+            status['fouten'].append(f'Wind: {e}')
+            traceback.print_exc()
+        schrijf(os.path.join(DATA, 'status-wind.json'), wlog)
+        status['wind'] = {k: wlog.get(k) for k in ('tot', 'uren', 'afstand_km', 'dagbestanden')}
+    try:
+        kp = noaa_kp()
+    except Exception as e:  # Kp is bijzaak
+        kp = {}
+        status['fouten'].append(f'Kp: {e}')
+    try:
+        geraakt = bewaar_bronnen(uren_per_bron) if uren_per_bron else {}
+        status['eigen_nieuwe_uren'] = herbereken_eigen(geraakt, kp)
+    except Exception as e:
+        status['fouten'].append(f'opslaan: {e}')
         traceback.print_exc()
 
     omni_pad = os.path.join(DATA, 'omni', f'{nu.year}.json')
@@ -299,7 +325,7 @@ def main():
         status['fouten'].append(f'toets: {e}')
 
     vorige = lees(os.path.join(DATA, 'status.json'), {})
-    for sleutel in ('omni', 'wind_verkenning'):
+    for sleutel in ('omni', 'wind_verkenning', 'wind'):
         if sleutel not in status and sleutel in vorige:
             status[sleutel] = vorige[sleutel]
     schrijf(os.path.join(DATA, 'status.json'), status)
