@@ -340,6 +340,11 @@ def main():
     except Exception as e:
         status['fouten'].append(f'Schumann: {e}')
     try:
+        import schumann_historie
+        schumann_historie.main(status)
+    except Exception as e:
+        status['fouten'].append(f'Schumann-historie: {e}')
+    try:
         toets_bijwerken(status)
     except Exception as e:
         status['fouten'].append(f'toets: {e}')
