@@ -6,7 +6,7 @@ Uitvoer in data/:
   bronnen/JJJJ.json dezelfde uren per satelliet apart (SOLAR1, IMAP, ACE, WIND), voor de toets per satelliet
   status-wind.json  wat de dagelijkse Wind-ophaal deed, met de gevonden variabelnamen
   controle.json     dagelijkse controle: GFZ-Kp, koppeling zonnewind-Kp, satellieten onderling
-  index/           eens per dag: Ap, Kp, F10.7 vanaf 1932, zonnevlekken vanaf 1610
+  index/           eens per dag (als de vorige dagstap meer dan 20 uur oud is): Ap, Kp, F10.7 vanaf 1932, zonnevlekken vanaf 1610
   schumann.json     elk uur: de drie Schumann-beelden uit Tomsk, zelf op de tak 'beelden'
   omni/JJJJ.json    officiële OMNI uurreeks, zelfde vorm
   live/minuten.json laatste 7 dagen per minuut, al verschoven naar de Aarde
@@ -284,7 +284,11 @@ def main():
 
     if 'uren_per_bron' not in locals():
         uren_per_bron = {}
-    dagelijks = os.environ.get('OMNI_NU') == 'ja' or nu.hour == 4
+    # GitHub start geplande runs vaak uren te laat, dus niet op een vast uur rekenen:
+    # de dagelijkse stap draait als de vorige meer dan 20 uur geleden is.
+    vorige_dag = lees(os.path.join(DATA, 'status.json'), {}).get('laatste_dagelijks', '')
+    dagelijks = os.environ.get('OMNI_NU') == 'ja' or vorige_dag < (nu - dt.timedelta(hours=20)).isoformat()
+    status['laatste_dagelijks'] = nu.isoformat(timespec='seconds') if dagelijks else vorige_dag
     if dagelijks or not os.path.exists(os.path.join(DATA, 'status-wind.json')):
         wlog = {'run': status['run']}
         try:

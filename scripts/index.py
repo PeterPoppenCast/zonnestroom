@@ -108,23 +108,19 @@ def groepsgetal(data):
 
 
 def aa_dag(data):
-    """NGDC aaindex: regels met datum en acht 3-uurswaarden plus daggemiddelde.
-    Vorm onbekend vooraf: zoek per regel een datum (JJMMDD of JJJJ MM DD) en neem het laatste getal als dagwaarde."""
+    """NGDC aaindex, vaste kolommen: 1-4 jaar, 5-6 maand, 7-8 dag, 9-32 acht 3-uurswaarden (I3),
+    33-37 daggemiddelde (F5.2, loopt over boven 99,99). Daarom zelf middelen over de acht 3-uurswaarden."""
     uit = {}
-    for r in regels(data):
-        p = r.split()
-        try:
-            if len(p[0]) == 8 and p[0].isdigit():
-                d = dt.date(int(p[0][:4]), int(p[0][4:6]), int(p[0][6:]))
-            elif len(p) >= 4 and len(p[0]) == 4:
-                d = dt.date(int(p[0]), int(p[1]), int(p[2]))
-            else:
-                continue
-            v = float(p[-1])
-        except (ValueError, IndexError):
+    for r in data.decode('latin-1').splitlines():
+        if len(r) < 32 or not r[:8].isdigit():
             continue
-        if 0 <= v < 1000:
-            uit[d] = round(v)
+        try:
+            d = dt.date(int(r[0:4]), int(r[4:6]), int(r[6:8]))
+            v = [int(r[8 + 3 * k:11 + 3 * k]) for k in range(8)]
+        except ValueError:
+            continue
+        if all(0 <= x < 1000 for x in v):
+            uit[d] = round(sum(v) / 8)
     if len(uit) < 20000:
         raise ValueError(f'te weinig dagen aa ({len(uit)})')
     return uit
@@ -166,6 +162,9 @@ def main(status=None):
             if d in a:
                 kol['aa'][i] = a[d]
         uit = {'start': str(START), 'n': n, 'end': str(eind), 'bron': 'GFZ Potsdam (Kp, Ap, F10.7), SILSO (zonnevlekken), NOAA NCEI (aa)'}
+        paren = [(kol['ap'][i], kol['aa'][i]) for i in range(n) if kol['ap'][i] != LEEG and kol['aa'][i] != LEEG]
+        if len(paren) > 1000:
+            uit['aa_naar_ap'] = round(sum(p for p, _ in paren) / sum(q for _, q in paren), 3)
         uit.update({k: b64(v) for k, v in kol.items()})
         if not a and vorige.get('aa') and vorige.get('start') == uit['start']:
             # aa verandert niet meer (eindigt 2010); oude kolom hergebruiken, aangevuld met lege waarden

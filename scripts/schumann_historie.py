@@ -15,6 +15,7 @@ Uitvoer:
   data/schumann/historie.json  voortgang en fouten
 """
 import base64
+import gzip
 import datetime as dt
 import json
 import os
@@ -33,7 +34,7 @@ CDX = 'https://web.archive.org/cdx/search/cdx?url={}&output=json&fl=timestamp,di
 RUW = 'https://web.archive.org/web/{}id_/{}'
 ADRESSEN = ['http://sosrff.tsu.ru/new/{}', 'https://sos70.ru/provider.php?file={}']
 BUDGET_S = 300
-VERSIE = 2
+VERSIE = 3
 BEVROREN = '20250905'  # het oude adres staat sindsdien stil; latere kopieën zijn steeds hetzelfde oude beeld
 VELDEN = ['f1', 'f2', 'f3', 'f4', 'a1', 'a2', 'a3', 'a4']
 LEEG = -32768
@@ -189,6 +190,8 @@ def tomsk(log, staat):
                     continue
                 ts, url = k[sleutel]
                 data = haal(RUW.format(ts, url), timeout=60)
+                if data[:2] == b'\x1f\x8b':  # het archief geeft sommige kopieën gezipt terug
+                    data = gzip.decompress(data)
                 if not data.startswith(b'\xff\xd8'):
                     raise ValueError(f'geen beeld in het archief: {data[:40]!r}')
                 r = digitaliseer.lees(data, soort)
